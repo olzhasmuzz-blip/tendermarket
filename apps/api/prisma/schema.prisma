@@ -1,0 +1,582 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountRole {
+  CUSTOMER
+  SUPPLIER
+  ARBITER
+  ADMIN
+}
+
+enum RequestStatus {
+  DRAFT
+  OPEN
+  PAUSED
+  AWARDED
+  CLOSED
+  CANCELLED
+}
+
+enum CoverageMode {
+  FULL
+  PARTIAL
+}
+
+enum ItemType {
+  PRODUCT
+  SERVICE
+}
+
+enum OfferStatus {
+  DRAFT
+  SUBMITTED
+  UPDATED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum DealStage {
+  NEGOTIATION
+  CONFIRMED
+  IN_PROGRESS
+  SHIPPED
+  RECEIVED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  NEEDS_INFO
+  RESOLVED
+  REJECTED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+  SMS
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
+}
+
+model User {
+  id               String               @id @default(cuid())
+  email            String?              @unique
+  phone            String?              @unique
+  passwordHash     String
+  displayName      String
+  locale           String               @default("ru-KZ")
+  isActive         Boolean              @default(true)
+  emailVerifiedAt  DateTime?
+  phoneVerifiedAt  DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  memberships      OrganizationMember[]
+  notifications    Notification[]
+  messages         ChatMessage[]
+  authoredRequests PurchaseRequest[]    @relation("RequestAuthor")
+  authoredOffers   Offer[]              @relation("OfferAuthor")
+  reviews          Review[]             @relation("ReviewAuthor")
+  auditEntries     AuditLog[]
+  refreshTokens    RefreshToken[]
+  uploadedFiles    Attachment[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Organization {
+  id              String               @id @default(cuid())
+  name            String
+  slug            String               @unique
+  description     String?
+  verifiedAt      DateTime?
+  region          String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  members         OrganizationMember[]
+  supplierProfile SupplierProfile?
+  requests        PurchaseRequest[]
+  offers          Offer[]
+  buyerDeals      Deal[]               @relation("BuyerOrganization")
+  supplierDeals   Deal[]               @relation("SupplierOrganization")
+  products        Product[]
+  advertisements  Advertisement[]
+  generalSubcontracts Subcontract[]    @relation("GeneralSupplierSubcontracts")
+  subcontractorDeals  Subcontract[]    @relation("SubcontractorSubcontracts")
+  subcontractBids     SubcontractBid[]
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           AccountRole
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId, role])
+  @@index([organizationId, role])
+}
+
+model SupplierProfile {
+  id              String             @id @default(cuid())
+  organizationId  String             @unique
+  publicName      String
+  about           String?
+  deliveryRegions String[]           @default([])
+  minOrderValue   Decimal?           @db.Decimal(14, 2)
+  responseRate    Float              @default(0)
+  averageRating   Float              @default(0)
+  reviewCount     Int                @default(0)
+  isPublished     Boolean            @default(false)
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  categories      SupplierCategory[]
+  reviews         Review[]
+
+  @@index([isPublished, averageRating])
+}
+
+model Category {
+  id                 String             @id @default(cuid())
+  slug               String             @unique
+  name               String
+  description        String?
+  icon               String?
+  type               ItemType           @default(PRODUCT)
+  parentId           String?
+  sortOrder          Int                @default(0)
+  isActive           Boolean            @default(true)
+  parent             Category?          @relation("CategoryTree", fields: [parentId], references: [id])
+  children           Category[]         @relation("CategoryTree")
+  products           Product[]
+  requestItems       RequestItem[]
+  supplierCategories SupplierCategory[]
+  advertisements     Advertisement[]
+
+  @@index([parentId, sortOrder])
+}
+
+model SupplierCategory {
+  supplierId String
+  categoryId String
+  supplier   SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  category   Category        @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([supplierId, categoryId])
+}
+
+model PurchaseRequest {
+  id               String        @id @default(cuid())
+  number           Int           @unique @default(autoincrement())
+  title            String
+  description      String?
+  type             ItemType      @default(PRODUCT)
+  customerId       String
+  organizationId   String?
+  region           String
+  deliveryAddress  String?
+  deliveryDeadline DateTime?
+  budget           Decimal?      @db.Decimal(14, 2)
+  currency         String        @default("KZT")
+  coverageMode     CoverageMode  @default(FULL)
+  status           RequestStatus @default(DRAFT)
+  responseDeadline DateTime?
+  publishedAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  customer         User          @relation("RequestAuthor", fields: [customerId], references: [id])
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+  items            RequestItem[]
+  offers           Offer[]
+  attachments      Attachment[]
+
+  @@index([status, region, publishedAt])
+  @@index([customerId, createdAt])
+}
+
+model RequestItem {
+  id              String          @id @default(cuid())
+  requestId       String
+  categoryId      String?
+  name            String
+  type            ItemType        @default(PRODUCT)
+  details         String?
+  quantity        Decimal         @db.Decimal(14, 3)
+  unit            String          @default("шт.")
+  preferredBrand  String?
+  allowEquivalent Boolean         @default(true)
+  sortOrder       Int             @default(0)
+  request         PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  category        Category?       @relation(fields: [categoryId], references: [id])
+  offerItems      OfferItem[]
+
+  @@index([requestId, sortOrder])
+}
+
+model Offer {
+  id            String          @id @default(cuid())
+  requestId     String
+  supplierId    String
+  authoredById  String
+  version       Int             @default(1)
+  status        OfferStatus     @default(DRAFT)
+  currency      String          @default("KZT")
+  deliveryPrice Decimal         @default(0) @db.Decimal(14, 2)
+  otherCosts    Decimal         @default(0) @db.Decimal(14, 2)
+  totalPrice    Decimal         @db.Decimal(14, 2)
+  deliveryDate  DateTime?
+  paymentTerms  String?
+  note          String?
+  expiresAt     DateTime?
+  fullCoverage  Boolean         @default(true)
+  submittedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  request       PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  supplier      Organization    @relation(fields: [supplierId], references: [id])
+  authoredBy    User            @relation("OfferAuthor", fields: [authoredById], references: [id])
+  items         OfferItem[]
+  deal          Deal?
+  attachments   Attachment[]
+
+  @@unique([requestId, supplierId, version])
+  @@index([requestId, status, totalPrice])
+  @@index([supplierId, status, submittedAt])
+}
+
+model OfferItem {
+  id                    String      @id @default(cuid())
+  offerId               String
+  requestItemId         String
+  unitPrice             Decimal?    @db.Decimal(14, 2)
+  available             Boolean     @default(false)
+  quantity              Decimal?    @db.Decimal(14, 3)
+  equivalentDescription String?
+  note                  String?
+  offer                 Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  requestItem           RequestItem @relation(fields: [requestItemId], references: [id])
+
+  @@unique([offerId, requestItemId])
+}
+
+model Deal {
+  id                     String        @id @default(cuid())
+  number                 Int           @unique @default(autoincrement())
+  offerId                String        @unique
+  buyerOrganizationId    String?
+  supplierOrganizationId String
+  stage                  DealStage     @default(NEGOTIATION)
+  agreedTotal            Decimal       @db.Decimal(14, 2)
+  currency               String        @default("KZT")
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  completedAt            DateTime?
+  offer                  Offer         @relation(fields: [offerId], references: [id])
+  buyer                  Organization? @relation("BuyerOrganization", fields: [buyerOrganizationId], references: [id])
+  supplier               Organization  @relation("SupplierOrganization", fields: [supplierOrganizationId], references: [id])
+  events                 DealEvent[]
+  messages               ChatMessage[]
+  dispute                Dispute?
+  reviews                Review[]
+  subcontracts           Subcontract[]
+  documents              DealDocument[]
+
+  @@index([stage, updatedAt])
+}
+
+model DealEvent {
+  id        String     @id @default(cuid())
+  dealId    String
+  actorId   String?
+  type      String
+  fromStage DealStage?
+  toStage   DealStage?
+  payload   Json?
+  createdAt DateTime   @default(now())
+  deal      Deal       @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId, createdAt])
+}
+
+model ChatMessage {
+  id          String    @id @default(cuid())
+  dealId      String
+  authorId    String?
+  body        String
+  attachment  Json?
+  systemEvent Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+  deal        Deal      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  author      User?     @relation(fields: [authorId], references: [id])
+  attachments Attachment[]
+
+  @@index([dealId, createdAt])
+}
+
+model Dispute {
+  id                String        @id @default(cuid())
+  dealId            String        @unique
+  openedById        String
+  assignedArbiterId String?
+  status            DisputeStatus @default(OPEN)
+  reason            String
+  details           String
+  decision          String?
+  arbitrationFee    Decimal       @default(0) @db.Decimal(14, 2)
+  feeStatus         String        @default("NOT_REQUIRED")
+  resolvedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deal              Deal          @relation(fields: [dealId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model Review {
+  id          String          @id @default(cuid())
+  dealId      String
+  authorId    String
+  supplierId  String
+  rating      Int
+  comment     String?
+  publishedAt DateTime?
+  createdAt   DateTime        @default(now())
+  deal        Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  author      User            @relation("ReviewAuthor", fields: [authorId], references: [id])
+  supplier    SupplierProfile @relation(fields: [supplierId], references: [id])
+
+  @@unique([dealId, authorId])
+  @@index([supplierId, publishedAt])
+}
+
+model Product {
+  id             String       @id @default(cuid())
+  organizationId String
+  categoryId     String
+  name           String
+  slug           String
+  type           ItemType     @default(PRODUCT)
+  description    String?
+  price          Decimal?     @db.Decimal(14, 2)
+  currency       String       @default("KZT")
+  unit           String       @default("шт.")
+  stockQuantity  Decimal?     @db.Decimal(14, 3)
+  region         String?
+  media          Json?
+  isPublished    Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category       Category     @relation(fields: [categoryId], references: [id])
+
+  @@unique([organizationId, slug])
+  @@index([categoryId, isPublished])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  payload   Json?
+  channel   NotificationChannel @default(IN_APP)
+  status    NotificationStatus  @default(QUEUED)
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime            @default(now())
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+}
+
+model Advertisement {
+  id             String   @id @default(cuid())
+  organizationId String
+  categoryId     String?
+  title          String
+  placement      String
+  region         String?
+  startsAt       DateTime
+  endsAt         DateTime
+  budget         Decimal  @db.Decimal(14, 2)
+  isActive       Boolean  @default(false)
+  status         String   @default("PENDING_REVIEW")
+  paymentStatus  String   @default("PENDING")
+  impressions    Int      @default(0)
+  clicks         Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category       Category? @relation(fields: [categoryId], references: [id])
+
+  @@index([isActive, placement, startsAt, endsAt])
+}
+
+model Attachment {
+  id           String           @id @default(cuid())
+  uploadedById String
+  storageKey   String           @unique
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  requestId    String?
+  offerId      String?
+  messageId    String?
+  uploadedAt   DateTime         @default(now())
+  uploadedBy   User             @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  request      PurchaseRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  offer        Offer?           @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  message      ChatMessage?     @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([uploadedById, uploadedAt])
+  @@index([requestId])
+  @@index([offerId])
+  @@index([messageId])
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+enum SubcontractStatus {
+  SEARCHING
+  AGREED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Subcontract {
+  id                   String            @id @default(cuid())
+  number               Int               @unique @default(autoincrement())
+  dealId               String
+  generalSupplierOrgId String
+  subcontractorOrgId   String?
+  title                String
+  targetRegion         String
+  description          String?
+  agreedAmount         Decimal           @db.Decimal(14, 2)
+  currency             String            @default("KZT")
+  deadline             DateTime?
+  status               SubcontractStatus @default(SEARCHING)
+  contractTerms        String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  completedAt          DateTime?
+  deal                 Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  generalSupplier      Organization      @relation("GeneralSupplierSubcontracts", fields: [generalSupplierOrgId], references: [id])
+  subcontractor        Organization?     @relation("SubcontractorSubcontracts", fields: [subcontractorOrgId], references: [id])
+  bids                 SubcontractBid[]
+
+  @@index([dealId, status])
+  @@index([targetRegion, status])
+  @@index([generalSupplierOrgId])
+  @@index([subcontractorOrgId])
+}
+
+model SubcontractBid {
+  id              String       @id @default(cuid())
+  subcontractId   String
+  contractorOrgId String
+  price           Decimal      @db.Decimal(14, 2)
+  proposedDate    DateTime?
+  note            String?
+  status          String       @default("PENDING")
+  createdAt       DateTime     @default(now())
+  subcontract     Subcontract  @relation(fields: [subcontractId], references: [id], onDelete: Cascade)
+  contractor      Organization @relation(fields: [contractorOrgId], references: [id])
+
+  @@index([subcontractId, status])
+  @@index([contractorOrgId])
+}
+
+enum DocumentType {
+  CONTRACT
+  INVOICE
+  ACT_OF_COMPLETION
+  WAYBILL
+  PAYMENT_RECEIPT
+}
+
+enum DocumentSignStatus {
+  DRAFT
+  SIGNED_BY_SUPPLIER
+  SIGNED_BY_BUYER
+  SIGNED_BY_BOTH
+}
+
+model DealDocument {
+  id                 String             @id @default(cuid())
+  dealId             String
+  type               DocumentType
+  number             String
+  title              String
+  content            Json
+  status             DocumentSignStatus @default(DRAFT)
+  pdfStorageKey      String?
+  supplierSignedAt   DateTime?
+  supplierSignIp     String?
+  supplierSignerName String?
+  buyerSignedAt      DateTime?
+  buyerSignIp        String?
+  buyerSignerName    String?
+  verificationCode   String             @default(cuid())
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  deal               Deal               @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, type])
+  @@index([dealId, type])
+}
+
+

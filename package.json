@@ -1,0 +1,23 @@
+{
+  "name": "tendermarket-platform",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n WEB,API -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "npm --prefix web run dev -- --host 0.0.0.0",
+    "dev:api": "npm --prefix apps/api run dev",
+    "build": "npm --prefix web run build && npm --prefix apps/api run build",
+    "typecheck": "npm --prefix web run typecheck && npm --prefix apps/api run typecheck",
+    "db:up": "docker compose up -d postgres redis minio",
+    "db:down": "docker compose down",
+    "db:local:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-postgres.ps1 start",
+    "db:local:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-postgres.ps1 stop",
+    "db:local:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-postgres.ps1 status",
+    "db:migrate": "npm --prefix apps/api run db:migrate",
+    "db:seed": "npm --prefix apps/api run db:seed",
+    "test:e2e:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/e2e-marketplace.ps1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
