@@ -10,3 +10,4 @@ apps/api/uploads/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+.env.local
